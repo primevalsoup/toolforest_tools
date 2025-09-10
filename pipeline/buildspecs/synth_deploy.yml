@@ -14,6 +14,8 @@ phases:
     commands:
       - echo "Synth for $ENV"
       - ENV=$ENV ./scripts/synth.sh
+      - echo "Validate templates"
+      - . .venv/bin/activate && python3 scripts/validate_templates.py
       - echo "Deploy for $ENV"
       - ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never
 artifacts:

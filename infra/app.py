@@ -7,6 +7,7 @@ import aws_cdk as cdk
 
 from infra.toolset_stacks import build_toolset_stacks
 from infra.pipelines import build_pipelines
+from infra.hooks_stack import HooksStack
 
 
 app = cdk.App()
@@ -20,5 +21,9 @@ build_toolset_stacks(app=app, env_name=env_name, default_tags={"owner": owner, "
 
 # Optionally synth pipelines if connection/repo info is set
 build_pipelines(app)
+
+# Optional: deploy hook validator lambda (registration step can be manual)
+if os.getenv("DEPLOY_HOOKS", "0") == "1":
+    HooksStack(app, "Toolforest-Hooks")
 
 app.synth()

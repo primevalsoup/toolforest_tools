@@ -41,6 +41,8 @@ class ToolsetStack(Stack):
         cdk.Tags.of(self).add("toolset_id", toolset_id)
         for k, v in default_tags.items():
             cdk.Tags.of(self).add(k, v)
+        # Mark stacks for our CFN Hook to enforce policies only on tagged stacks
+        cdk.Tags.of(self).add("toolforest-tools", "1")
 
         # Role
         role = iam.Role(

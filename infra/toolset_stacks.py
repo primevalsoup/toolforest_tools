@@ -131,12 +131,14 @@ class ToolsetStack(Stack):
                 "Version": version.version,
             },
         )
-        ssm.StringParameter(
+        registry_param = ssm.StringParameter(
             self,
             "RegistryEntry",
             parameter_name=f"/toolforest/{env_name}/toolsets/{name}",
             string_value=registry_str,
         )
+        # Ensure alias is created before registry is written
+        registry_param.node.add_dependency(alias)
 
 
 def build_toolset_stacks(*, app: cdk.App, env_name: str, default_tags: Dict[str, str]) -> None:

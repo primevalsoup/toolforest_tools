@@ -18,6 +18,8 @@ phases:
       - . .venv/bin/activate && python3 scripts/validate_templates.py
       - echo "Deploy for $ENV"
       - ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never
+      - echo "Smoke test for $ENV"
+      - . .venv/bin/activate && PYTHONPATH=packages/mcp-remote-toolsets/src ENV=$ENV python3 scripts/smoke_invoke.py
 artifacts:
   files:
     - cdk.out/**

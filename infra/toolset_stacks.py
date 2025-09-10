@@ -90,7 +90,7 @@ class ToolsetStack(Stack):
             timeout=cdk.Duration.seconds(timeout),
             environment={"ENV": env_name, **env_vars},
             layers=layer_objs,
-            architecture=_lambda.Architecture.ARM_64,
+            architecture=_lambda.Architecture.X86_64,
         )
 
         version = fn.current_version

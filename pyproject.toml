@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+pythonpath = [
+  ".",
+  "packages/mcp-lambda-runtime/src",
+  "packages/mcp-remote-toolsets/src",
+]

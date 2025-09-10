@@ -1,0 +1,15 @@
+toolset_id: "7b7b2a38-269e-4a1f-9dbf-6a85bf2abf4d"
+name: "math"
+runtime: "python3.12"
+handler: "lambda_handler.handler"
+memory_mb: 256
+timeout_s: 15
+env:
+  LOG_LEVEL: "INFO"
+permissions: []
+layers: []
+alarms:
+  errors_threshold: 1
+  duration_p95_ms: 1000
+registry:
+  enabled: true

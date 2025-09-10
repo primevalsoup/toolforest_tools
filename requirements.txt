@@ -1,0 +1,17 @@
+# Core
+pydantic==2.8.2
+boto3==1.35.7
+jsonschema==4.23.0
+tenacity==9.0.0
+PyYAML==6.0.2
+
+# Testing
+pytest==8.3.2
+
+# CDK
+aws-cdk-lib==2.153.0
+constructs==10.3.0
+
+# Lint (optional)
+ruff==0.6.2
+mypy==1.11.2

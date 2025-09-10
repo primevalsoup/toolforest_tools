@@ -1,0 +1,21 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH=$HOME/.local/bin:$PATH
+      - uv venv --python 3.12
+      - . .venv/bin/activate
+      - uv pip install -r requirements.txt
+      - npm install -g aws-cdk@2
+  build:
+    commands:
+      - echo "Synth for $ENV"
+      - ENV=$ENV ./scripts/synth.sh
+      - echo "Deploy for $ENV"
+      - ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never
+artifacts:
+  files:
+    - cdk.out/**

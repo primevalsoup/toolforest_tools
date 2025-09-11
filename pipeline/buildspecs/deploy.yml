@@ -1,0 +1,31 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH=$HOME/.local/bin:$PATH
+      - uv venv --python 3.12
+      - . .venv/bin/activate
+      - uv pip install -r requirements.txt
+      - npm install -g aws-cdk@2
+  build:
+    commands:
+      - echo "Ensure cdk.out available from artifacts"
+      - |
+        if [ ! -d cdk.out ]; then
+          CANDIDATE=$(find . -maxdepth 3 -type d -name cdk.out | head -n1 || true)
+          if [ -n "$CANDIDATE" ]; then
+            echo "Using cdk.out from $CANDIDATE"; cp -R "$CANDIDATE" ./cdk.out;
+          else
+            echo "cdk.out not found"; exit 1;
+          fi
+        fi
+      - echo "Deploy from pre-synthesized templates"
+      - ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --app cdk.out --require-approval never
+      - echo "Smoke test for $ENV"
+      - . .venv/bin/activate && PYTHONPATH=packages/mcp-remote-toolsets/src ENV=$ENV python3 scripts/smoke_invoke.py
+artifacts:
+  files:
+    - cdk.out/**

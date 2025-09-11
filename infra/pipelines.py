@@ -30,7 +30,7 @@ class ToolsetPipelineStack(Stack):
         super().__init__(scope, construct_id)
 
         source_output = codepipeline.Artifact()
-        build_output = codepipeline.Artifact()
+        build_output = codepipeline.Artifact(artifact_name="SynthOutput")
 
         if connection_arn:
             source_action = cpactions.CodeStarConnectionsSourceAction(
@@ -55,7 +55,6 @@ class ToolsetPipelineStack(Stack):
                 trigger=cpactions.GitHubTrigger.WEBHOOK,
             )
 
-        # Test project
         test_project = codebuild.PipelineProject(
             self,
             "TestProject",
@@ -64,7 +63,6 @@ class ToolsetPipelineStack(Stack):
             build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/test.yml"),
         )
 
-        # Build (synth) project
         build_project = codebuild.PipelineProject(
             self,
             "BuildProject",
@@ -73,7 +71,6 @@ class ToolsetPipelineStack(Stack):
             build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/build.yml"),
         )
 
-        # Deploy project (deploy + smoke)
         deploy_project = codebuild.PipelineProject(
             self,
             "DeployProject",
@@ -82,22 +79,18 @@ class ToolsetPipelineStack(Stack):
                 "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
                 "OWNER": codebuild.BuildEnvironmentVariable(value=os.getenv("OWNER", "gerrit@toolforest.io")),
             },
-            build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/synth_deploy.yml"),
+            build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/deploy.yml"),
         )
 
-        # Expand deploy permissions
         if deploy_project.role:
             deploy_project.role.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name("AdministratorAccess"))
 
-        # Actions
         test_action = cpactions.CodeBuildAction(action_name="Test", project=test_project, input=source_output)
         build_action = cpactions.CodeBuildAction(action_name="Build", project=build_project, input=source_output, outputs=[build_output])
-        deploy_action = cpactions.CodeBuildAction(action_name="DeployAndValidate", project=deploy_project, input=source_output)
+        deploy_action = cpactions.CodeBuildAction(action_name="DeployAndValidate", project=deploy_project, input=build_output)
 
-        # Pipeline V2 with explicit name
         pipeline = codepipeline.Pipeline(self, "Pipeline", pipeline_name=f"toolforest-tools-pipeline-{env_name}", pipeline_type=codepipeline.PipelineType.V2)
 
-        # Stages
         pipeline.add_stage(stage_name="Source", actions=[source_action])
         pipeline.add_stage(stage_name="Test", actions=[test_action])
         pipeline.add_stage(stage_name="Build", actions=[build_action])

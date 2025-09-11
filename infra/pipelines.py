@@ -30,7 +30,6 @@ class ToolsetPipelineStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id)
 
-        # S3 cache bucket (one per pipeline stack)
         cache_bucket = s3.Bucket(
             self,
             "CodeBuildCacheBucket",
@@ -86,6 +85,40 @@ class ToolsetPipelineStack(Stack):
             cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/build/{env_name}"),
         )
 
+        # Inline deploy buildspec so it does not depend on primary source containing the file
+        deploy_buildspec = codebuild.BuildSpec.from_object(
+            {
+                "version": "0.2",
+                "phases": {
+                    "install": {
+                        "runtime-versions": {"python": "3.12"},
+                        "commands": [
+                            "curl -LsSf https://astral.sh/uv/install.sh | sh",
+                            "export PATH=$HOME/.local/bin:$PATH",
+                            "uv venv --python 3.12",
+                            ". .venv/bin/activate",
+                            "uv pip install -r requirements.txt",
+                            "npm install -g aws-cdk@2",
+                        ],
+                    },
+                    "build": {
+                        "commands": [
+                            "echo Ensure cdk.out available from artifacts",
+                            "if [ ! -d cdk.out ]; then CANDIDATE=$(find . -maxdepth 3 -type d -name cdk.out | head -n1 || true); if [ -n \"$CANDIDATE\" ]; then echo Using cdk.out from $CANDIDATE; cp -R \"$CANDIDATE\" ./cdk.out; else echo cdk.out not found; exit 1; fi; fi",
+                            "echo Deploy from pre-synthesized templates",
+                            "ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --app cdk.out --require-approval never",
+                            "echo Smoke test for $ENV",
+                            # Locate smoke script in secondary source (repo) and run it
+                            "SMOKE=$(find . -maxdepth 5 -type f -path '*/scripts/smoke_invoke.py' | head -n1 || true)",
+                            "if [ -z \"$SMOKE\" ]; then echo 'smoke_invoke.py not found'; exit 1; fi",
+                            ". .venv/bin/activate && PYTHONPATH=packages/mcp-remote-toolsets/src ENV=$ENV python3 \"$SMOKE\"",
+                        ],
+                    },
+                },
+                "artifacts": {"files": ["cdk.out/**"]},
+            }
+        )
+
         deploy_project = codebuild.PipelineProject(
             self,
             "DeployProject",
@@ -94,7 +127,7 @@ class ToolsetPipelineStack(Stack):
                 "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
                 "OWNER": codebuild.BuildEnvironmentVariable(value=os.getenv("OWNER", "gerrit@toolforest.io")),
             },
-            build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/deploy.yml"),
+            build_spec=deploy_buildspec,
             cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/deploy/{env_name}"),
         )
 
@@ -103,7 +136,8 @@ class ToolsetPipelineStack(Stack):
 
         test_action = cpactions.CodeBuildAction(action_name="Test", project=test_project, input=source_output)
         build_action = cpactions.CodeBuildAction(action_name="Build", project=build_project, input=source_output, outputs=[build_output])
-        deploy_action = cpactions.CodeBuildAction(action_name="DeployAndValidate", project=deploy_project, input=build_output)
+        # Provide both artifacts: primary is SynthOutput, extra is source repo for smoke script
+        deploy_action = cpactions.CodeBuildAction(action_name="DeployAndValidate", project=deploy_project, input=build_output, extra_inputs=[source_output])
 
         pipeline = codepipeline.Pipeline(self, "Pipeline", pipeline_name=f"toolforest-tools-pipeline-{env_name}", pipeline_type=codepipeline.PipelineType.V2)
 

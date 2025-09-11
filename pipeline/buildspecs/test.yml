@@ -11,4 +11,4 @@ phases:
       - uv pip install -r requirements.txt
   build:
     commands:
-      - . .venv/bin/activate && pytest -q
+      - . .venv/bin/activate && pytest -q toolsets

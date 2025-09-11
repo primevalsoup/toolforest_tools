@@ -10,6 +10,7 @@ from aws_cdk import (
     aws_codepipeline as codepipeline,
     aws_codepipeline_actions as cpactions,
     aws_iam as iam,
+    aws_s3 as s3,
 )
 from constructs import Construct
 
@@ -28,6 +29,18 @@ class ToolsetPipelineStack(Stack):
         github_token_secret_name: str | None,
     ) -> None:
         super().__init__(scope, construct_id)
+
+        # S3 cache bucket (one per pipeline stack)
+        cache_bucket = s3.Bucket(
+            self,
+            "CodeBuildCacheBucket",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            versioned=False,
+            auto_delete_objects=False,
+            removal_policy=cdk.RemovalPolicy.RETAIN,
+        )
 
         source_output = codepipeline.Artifact()
         build_output = codepipeline.Artifact(artifact_name="SynthOutput")
@@ -61,6 +74,7 @@ class ToolsetPipelineStack(Stack):
             environment=codebuild.BuildEnvironment(build_image=codebuild.LinuxBuildImage.STANDARD_7_0, privileged=True),
             environment_variables={"ENV": codebuild.BuildEnvironmentVariable(value=env_name)},
             build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/test.yml"),
+            cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/test/{env_name}"),
         )
 
         build_project = codebuild.PipelineProject(
@@ -69,6 +83,7 @@ class ToolsetPipelineStack(Stack):
             environment=codebuild.BuildEnvironment(build_image=codebuild.LinuxBuildImage.STANDARD_7_0, privileged=True),
             environment_variables={"ENV": codebuild.BuildEnvironmentVariable(value=env_name)},
             build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/build.yml"),
+            cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/build/{env_name}"),
         )
 
         deploy_project = codebuild.PipelineProject(
@@ -80,6 +95,7 @@ class ToolsetPipelineStack(Stack):
                 "OWNER": codebuild.BuildEnvironmentVariable(value=os.getenv("OWNER", "gerrit@toolforest.io")),
             },
             build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/deploy.yml"),
+            cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/deploy/{env_name}"),
         )
 
         if deploy_project.role:

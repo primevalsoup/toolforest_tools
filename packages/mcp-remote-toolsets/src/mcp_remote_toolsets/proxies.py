@@ -2,15 +2,27 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import boto3
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+# Pluggable context provider callable injected by the MCP server (returns dict with user_jwt, etc.)
+_context_provider: Optional[Callable[[], Dict[str, Any]]] = None
+
+
+def set_context_provider(provider: Callable[[], Dict[str, Any]]) -> None:
+    global _context_provider
+    _context_provider = provider
 
 
 @retry(wait=wait_exponential(multiplier=0.2, min=0.2, max=2), stop=stop_after_attempt(3))
 def _invoke_lambda(function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     client = boto3.client("lambda")
+    # Attach optional context (e.g., user_jwt)
+    if _context_provider is not None:
+        ctx = _context_provider() or {}
+        payload.setdefault("context", ctx)
     resp = client.invoke(FunctionName=function_name, Payload=json.dumps(payload).encode("utf-8"))
     body = resp["Payload"].read().decode("utf-8")
     return json.loads(body or "{}")

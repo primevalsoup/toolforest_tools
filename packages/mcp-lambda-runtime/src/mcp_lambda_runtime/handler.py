@@ -8,6 +8,7 @@ from typing import Any, Dict
 from pydantic import BaseModel, ValidationError
 
 from .registry import ToolRegistry
+from .context import RequestContext, set_request_context
 
 
 class RpcError(Exception):
@@ -27,6 +28,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     start = time.time()
     env = os.getenv("ENV", "dev")
     registry = ToolRegistry.instance()
+
+    # Extract optional auth context
+    user_jwt = ""
+    ctx = event.get("context") or {}
+    if isinstance(ctx, dict):
+        user_jwt = str(ctx.get("user_jwt") or "")
+    set_request_context(RequestContext(user_jwt=user_jwt))
 
     try:
         action = event.get("action")
@@ -65,7 +73,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _response(error={"type": "InternalError", "message": str(e)})
     finally:
         duration_ms = int((time.time() - start) * 1000)
-        # Simple structured log
         print(
             json.dumps(
                 {
@@ -74,6 +81,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "event": "lambda_request",
                     "duration_ms": duration_ms,
                     "action": event.get("action"),
+                    "has_user_jwt": bool(user_jwt),
                 }
             )
         )

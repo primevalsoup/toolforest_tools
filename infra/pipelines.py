@@ -68,7 +68,6 @@ class ToolsetPipelineStack(Stack):
             build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/synth_deploy.yml"),
         )
 
-        # Grant broad permissions for CDK deploy
         if project.role:
             project.role.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name("AdministratorAccess"))
 
@@ -80,6 +79,11 @@ class ToolsetPipelineStack(Stack):
 
         pipeline = codepipeline.Pipeline(self, "Pipeline")
         pipeline.add_stage(stage_name="Source", actions=[source_action])
+
+        if env_name == "prod":
+            approval = cpactions.ManualApprovalAction(action_name="ManualApproval")
+            pipeline.add_stage(stage_name="Approve", actions=[approval])
+
         pipeline.add_stage(stage_name="Deploy", actions=[deploy_action])
 
 
@@ -90,10 +94,8 @@ def build_pipelines(app: cdk.App) -> None:
     github_token_secret_name = app.node.try_get_context("github_token_secret_name") or os.getenv("GITHUB_TOKEN_SECRET_NAME")
 
     if not (github_owner and github_repo):
-        # Skip creating pipelines if repo info is missing
         return
 
-    # Branch-to-env mapping
     mappings = {
         "develop": "dev",
         "test": "test",

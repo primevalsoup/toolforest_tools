@@ -1,0 +1,14 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH=$HOME/.local/bin:$PATH
+      - uv venv --python 3.12
+      - . .venv/bin/activate
+      - uv pip install -r requirements.txt
+  build:
+    commands:
+      - . .venv/bin/activate && pytest -q

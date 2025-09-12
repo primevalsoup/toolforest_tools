@@ -181,20 +181,6 @@ class ToolsetPipelineStack(Stack):
         else:
             build_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
 
-        build_project = codebuild.PipelineProject(
-            self,
-            "BuildProject",
-            project_name=f"toolforest-tools-build-{env_name}",
-            environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
-                privileged=True,
-                compute_type=compute_type,
-            ),
-            environment_variables=build_env_vars,
-            build_spec=build_buildspec,
-            cache=codebuild.Cache.local(codebuild.LocalCacheMode.DOCKER_LAYER, codebuild.LocalCacheMode.CUSTOM),
-        )
-
         deploy_buildspec = codebuild.BuildSpec.from_object(
             {
                 "version": "0.2",
@@ -205,6 +191,8 @@ class ToolsetPipelineStack(Stack):
                         "commands": [
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",
+                            # Enforce PAT in prod
+                            "if [ \"$ENV\" = \"prod\" ] && [ -z \"$GITHUB_PAT\" ]; then echo 'GITHUB_PAT required in prod to install private adapter'; exit 1; fi",
                             "python -m pip install --upgrade pip",
                             # Prefer main source requirements.txt
                             "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
@@ -234,13 +222,22 @@ class ToolsetPipelineStack(Stack):
             "OWNER": codebuild.BuildEnvironmentVariable(value=os.getenv("OWNER", "gerrit@toolforest.io")),
             "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
         }
-        if github_token_secret_name:
+        # Enforce GITHUB_PAT presence for prod; optional otherwise
+        if env_name == "prod":
+            if not github_token_secret_name:
+                raise ValueError("GITHUB_TOKEN_SECRET_NAME must be set for prod to install private adapter")
             deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(
                 value=github_token_secret_name,
                 type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
             )
         else:
-            deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
+            if github_token_secret_name:
+                deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(
+                    value=github_token_secret_name,
+                    type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+                )
+            else:
+                deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
 
         deploy_project = codebuild.PipelineProject(
             self,

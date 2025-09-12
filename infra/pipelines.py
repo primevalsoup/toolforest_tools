@@ -69,28 +69,28 @@ class ToolsetPipelineStack(Stack):
 
         client_source_output: Optional[codepipeline.Artifact] = None
         client_source_action: Optional[cpactions.GitHubSourceAction] = None
-        if env_name in ("dev", "test"):
-            client_source_output = codepipeline.Artifact(artifact_name="ClientSource")
-            if connection_arn:
-                client_source_action = cpactions.CodeStarConnectionsSourceAction(
-                    action_name="ClientSource",
-                    owner=github_owner,
-                    repo="toolforest_tools_client",
-                    branch=github_branch,
-                    connection_arn=connection_arn,
-                    output=client_source_output,
-                    trigger_on_push=True,
-                )  # type: ignore[assignment]
-            else:
-                client_source_action = cpactions.GitHubSourceAction(
-                    action_name="ClientSource",
-                    owner=github_owner,
-                    repo="toolforest_tools_client",
-                    branch=github_branch,
-                    oauth_token=cdk.SecretValue.secrets_manager(github_token_secret_name),
-                    output=client_source_output,
-                    trigger=cpactions.GitHubTrigger.WEBHOOK,
-                )
+        # Include client source for all environments to ensure consistent adapter
+        client_source_output = codepipeline.Artifact(artifact_name="ClientSource")
+        if connection_arn:
+            client_source_action = cpactions.CodeStarConnectionsSourceAction(
+                action_name="ClientSource",
+                owner=github_owner,
+                repo="toolforest_tools_client",
+                branch=github_branch,
+                connection_arn=connection_arn,
+                output=client_source_output,
+                trigger_on_push=True,
+            )  # type: ignore[assignment]
+        else:
+            client_source_action = cpactions.GitHubSourceAction(
+                action_name="ClientSource",
+                owner=github_owner,
+                repo="toolforest_tools_client",
+                branch=github_branch,
+                oauth_token=cdk.SecretValue.secrets_manager(github_token_secret_name),
+                output=client_source_output,
+                trigger=cpactions.GitHubTrigger.WEBHOOK,
+            )
 
         compute_type = codebuild.ComputeType.SMALL
 
@@ -136,7 +136,7 @@ class ToolsetPipelineStack(Stack):
             "TestProject",
             project_name=f"toolforest-tools-test-{env_name}",
             environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                build_image=codebuild.LinuxBuildImage.STANDARD_8_0,
                 privileged=True,
                 compute_type=compute_type,
             ),
@@ -186,7 +186,7 @@ class ToolsetPipelineStack(Stack):
             "BuildProject",
             project_name=f"toolforest-tools-build-{env_name}",
             environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                build_image=codebuild.LinuxBuildImage.STANDARD_8_0,
                 privileged=True,
                 compute_type=compute_type,
             ),
@@ -259,7 +259,7 @@ class ToolsetPipelineStack(Stack):
             "DeployProject",
             project_name=f"toolforest-tools-deploy-{env_name}",
             environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                build_image=codebuild.LinuxBuildImage.STANDARD_8_0,
                 privileged=True,
                 compute_type=compute_type,
             ),

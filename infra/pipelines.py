@@ -67,7 +67,6 @@ class ToolsetPipelineStack(Stack):
                 trigger=cpactions.GitHubTrigger.WEBHOOK,
             )
 
-        # Optional second Source for client adapter (dev/test only)
         client_source_output: Optional[codepipeline.Artifact] = None
         client_source_action: Optional[cpactions.GitHubSourceAction] = None
         if env_name in ("dev", "test"):
@@ -93,10 +92,8 @@ class ToolsetPipelineStack(Stack):
                     trigger=cpactions.GitHubTrigger.WEBHOOK,
                 )
 
-        # Compute type: SMALL for all environments
         compute_type = codebuild.ComputeType.SMALL
 
-        # Inline Test buildspec
         test_buildspec = codebuild.BuildSpec.from_object(
             {
                 "version": "0.2",
@@ -107,13 +104,13 @@ class ToolsetPipelineStack(Stack):
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",
                             "python -m pip install --upgrade pip",
-                            "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
+                            # Prefer main source requirements.txt
+                            "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
                             # Install client adapter from second source if present (branch-aligned)
-                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then echo \"Installing client from $CLIENT\"; pip install -e \"$CLIENT\"; else echo \"No client source found; using pinned adapter\"; fi",
+                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then echo \"Installing client from $CLIENT\"; pip install -e \"$CLIENT\"; else echo \"No client source found; using pinned adapter\"; fi",
                             # Fallback network install (dev/test only) if needed
                             "if [ -z \"$CLIENT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || true; fi",
-                            # Verify import
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                         ],
                     },
@@ -121,6 +118,18 @@ class ToolsetPipelineStack(Stack):
                 },
             }
         )
+
+        test_env_vars: dict[str, codebuild.BuildEnvironmentVariable] = {
+            "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
+            "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
+        }
+        if github_token_secret_name:
+            test_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(
+                value=github_token_secret_name,
+                type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+            )
+        else:
+            test_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
 
         test_project = codebuild.PipelineProject(
             self,
@@ -131,20 +140,11 @@ class ToolsetPipelineStack(Stack):
                 privileged=True,
                 compute_type=compute_type,
             ),
-            environment_variables={
-                "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
-                "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
-                # Provide GitHub token to build for private repo install
-                "GITHUB_PAT": codebuild.BuildEnvironmentVariable(
-                    value=github_token_secret_name or "",
-                    type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
-                ),
-            },
+            environment_variables=test_env_vars,
             build_spec=test_buildspec,
             cache=codebuild.Cache.local(codebuild.LocalCacheMode.CUSTOM),
         )
 
-        # Inline Build buildspec
         build_buildspec = codebuild.BuildSpec.from_object(
             {
                 "version": "0.2",
@@ -155,10 +155,11 @@ class ToolsetPipelineStack(Stack):
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",
                             "python -m pip install --upgrade pip",
-                            "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
+                            # Prefer main source requirements.txt
+                            "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Optional: install client adapter if needed for synth (not strictly required)
-                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then pip install -e \"$CLIENT\"; else pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || true; fi",
+                            # Optional: install client adapter if present for synth
+                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then pip install -e \"$CLIENT\"; else pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || true; fi",
                             "npm install -g aws-cdk@2",
                         ],
                     },
@@ -167,6 +168,18 @@ class ToolsetPipelineStack(Stack):
                 "artifacts": {"files": ["cdk.out/**"]},
             }
         )
+
+        build_env_vars: dict[str, codebuild.BuildEnvironmentVariable] = {
+            "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
+            "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
+        }
+        if github_token_secret_name:
+            build_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(
+                value=github_token_secret_name,
+                type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+            )
+        else:
+            build_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
 
         build_project = codebuild.PipelineProject(
             self,
@@ -177,19 +190,11 @@ class ToolsetPipelineStack(Stack):
                 privileged=True,
                 compute_type=compute_type,
             ),
-            environment_variables={
-                "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
-                "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
-                "GITHUB_PAT": codebuild.BuildEnvironmentVariable(
-                    value=github_token_secret_name or "",
-                    type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
-                ),
-            },
+            environment_variables=build_env_vars,
             build_spec=build_buildspec,
             cache=codebuild.Cache.local(codebuild.LocalCacheMode.DOCKER_LAYER, codebuild.LocalCacheMode.CUSTOM),
         )
 
-        # Inline deploy buildspec remains unchanged (installs pinned or token-based adapter)
         deploy_buildspec = codebuild.BuildSpec.from_object(
             {
                 "version": "0.2",
@@ -201,7 +206,8 @@ class ToolsetPipelineStack(Stack):
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",
                             "python -m pip install --upgrade pip",
-                            "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
+                            # Prefer main source requirements.txt
+                            "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
                             "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
@@ -223,6 +229,19 @@ class ToolsetPipelineStack(Stack):
             }
         )
 
+        deploy_env_vars: dict[str, codebuild.BuildEnvironmentVariable] = {
+            "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
+            "OWNER": codebuild.BuildEnvironmentVariable(value=os.getenv("OWNER", "gerrit@toolforest.io")),
+            "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
+        }
+        if github_token_secret_name:
+            deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(
+                value=github_token_secret_name,
+                type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+            )
+        else:
+            deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
+
         deploy_project = codebuild.PipelineProject(
             self,
             "DeployProject",
@@ -232,15 +251,7 @@ class ToolsetPipelineStack(Stack):
                 privileged=True,
                 compute_type=compute_type,
             ),
-            environment_variables={
-                "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
-                "OWNER": codebuild.BuildEnvironmentVariable(value=os.getenv("OWNER", "gerrit@toolforest.io")),
-                "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
-                "GITHUB_PAT": codebuild.BuildEnvironmentVariable(
-                    value=github_token_secret_name or "",
-                    type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
-                ),
-            },
+            environment_variables=deploy_env_vars,
             build_spec=deploy_buildspec,
             cache=codebuild.Cache.local(codebuild.LocalCacheMode.DOCKER_LAYER, codebuild.LocalCacheMode.CUSTOM),
         )
@@ -259,7 +270,6 @@ class ToolsetPipelineStack(Stack):
 
         pipeline = codepipeline.Pipeline(self, "Pipeline", pipeline_name=f"toolforest-tools-pipeline-{env_name}", pipeline_type=codepipeline.PipelineType.V2)
 
-        # Source stage with one or two actions
         if client_source_action is not None:
             pipeline.add_stage(stage_name=f"toolforest-tools-source-{env_name}", actions=[source_action, client_source_action])
         else:

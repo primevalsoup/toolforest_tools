@@ -69,28 +69,28 @@ class ToolsetPipelineStack(Stack):
 
         client_source_output: Optional[codepipeline.Artifact] = None
         client_source_action: Optional[cpactions.GitHubSourceAction] = None
-        # Include client source for all environments to ensure consistent adapter
-        client_source_output = codepipeline.Artifact(artifact_name="ClientSource")
-        if connection_arn:
-            client_source_action = cpactions.CodeStarConnectionsSourceAction(
-                action_name="ClientSource",
-                owner=github_owner,
-                repo="toolforest_tools_client",
-                branch=github_branch,
-                connection_arn=connection_arn,
-                output=client_source_output,
-                trigger_on_push=True,
-            )  # type: ignore[assignment]
-        else:
-            client_source_action = cpactions.GitHubSourceAction(
-                action_name="ClientSource",
-                owner=github_owner,
-                repo="toolforest_tools_client",
-                branch=github_branch,
-                oauth_token=cdk.SecretValue.secrets_manager(github_token_secret_name),
-                output=client_source_output,
-                trigger=cpactions.GitHubTrigger.WEBHOOK,
-            )
+        if env_name in ("dev", "test"):
+            client_source_output = codepipeline.Artifact(artifact_name="ClientSource")
+            if connection_arn:
+                client_source_action = cpactions.CodeStarConnectionsSourceAction(
+                    action_name="ClientSource",
+                    owner=github_owner,
+                    repo="toolforest_tools_client",
+                    branch=github_branch,
+                    connection_arn=connection_arn,
+                    output=client_source_output,
+                    trigger_on_push=True,
+                )  # type: ignore[assignment]
+            else:
+                client_source_action = cpactions.GitHubSourceAction(
+                    action_name="ClientSource",
+                    owner=github_owner,
+                    repo="toolforest_tools_client",
+                    branch=github_branch,
+                    oauth_token=cdk.SecretValue.secrets_manager(github_token_secret_name),
+                    output=client_source_output,
+                    trigger=cpactions.GitHubTrigger.WEBHOOK,
+                )
 
         compute_type = codebuild.ComputeType.SMALL
 
@@ -211,8 +211,8 @@ class ToolsetPipelineStack(Stack):
                             # Prefer main source requirements.txt
                             "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter: prefer local ClientSource if present (dev/test), else use Git
-                            "CLIENT_SRC=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT_SRC=\"$d\"; break; fi; done; if [ -n \"$CLIENT_SRC\" ]; then echo \"Installing client adapter from local source: $CLIENT_SRC\"; pip install -e \"$CLIENT_SRC\"; else if [ -n \"$GITHUB_PAT\" ]; then echo \"Installing client adapter from pinned Git URL\"; pip install \"git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\"; else echo \"Installing client adapter from public Git URL (if accessible)\"; pip install \"git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\" || true; fi; fi",
+                            # Install client adapter: dev/test prefer local ClientSource; prod uses pinned Git URL only
+                            "if [ \"$ENV\" != \"prod\" ]; then CLIENT_SRC=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT_SRC=\"$d\"; break; fi; done; if [ -n \"$CLIENT_SRC\" ]; then echo \"Installing client adapter from local source: $CLIENT_SRC\"; pip install -e \"$CLIENT_SRC\"; else echo \"Installing client adapter from pinned Git URL (non-prod)\"; pip install \"git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\" || pip install \"git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\"; fi; else echo \"Installing client adapter from pinned Git URL (prod)\"; pip install \"git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\"; fi",
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                             "npm install -g aws-cdk@2",
                         ],

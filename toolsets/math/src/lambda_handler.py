@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from mcp_lambda_runtime import handler as runtime_handler
 from mcp_lambda_runtime import tool, ToolRegistry
+from mcp_lambda_runtime.context import get_user_jwt
 
 
 class AddParams(BaseModel):
@@ -19,6 +20,20 @@ class AddResult(BaseModel):
 def add(params: AddParams) -> AddResult:
     """Add two numbers."""
     return AddResult(value=params.x + params.y)
+
+
+class WhoAmIParams(BaseModel):
+    pass
+
+
+class WhoAmIResult(BaseModel):
+    user_jwt: str = Field("", description="Propagated user JWT from MCP context")
+
+
+@tool
+def whoami(params: WhoAmIParams) -> WhoAmIResult:
+    """Return the propagated user JWT for validation."""
+    return WhoAmIResult(user_jwt=get_user_jwt())
 
 
 # Initialize registry metadata

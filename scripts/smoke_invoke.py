@@ -10,11 +10,24 @@ def main() -> None:
     env = os.getenv("ENV", "dev")
     entries = load_registry(env)
     proxies = load_toolset_proxies(entries)
+
+    # Basic add test
     add = proxies.get("math.add")
     if not add:
         raise SystemExit("math.add not found in registry")
     result = add(x=2, y=40)
     print(result)
+
+    # JWT propagation test
+    os.environ["MCP_USER_JWT"] = os.getenv("MCP_USER_JWT", "test-jwt-abc.def.ghijklmnopqrstuvwxyz1234567890abcd")
+    whoami = proxies.get("math.whoami")
+    if not whoami:
+        raise SystemExit("math.whoami not found in registry")
+    w = whoami()
+    expected = os.environ["MCP_USER_JWT"]
+    if not isinstance(w, dict) or w.get("user_jwt") != expected:
+        raise SystemExit(f"JWT propagation failed: expected {expected}, got {w}")
+    print({"user_jwt": w.get("user_jwt")})
 
 
 if __name__ == "__main__":

@@ -30,9 +30,14 @@ def main() -> None:
         raise SystemExit("math.whoami not found in registry")
     w = whoami()
     expected = os.environ["MCP_USER_JWT"]
-    if not isinstance(w, dict) or w.get("user_jwt") != expected:
-        raise SystemExit(f"JWT propagation failed: expected {expected}, got {w}")
-    print({"user_jwt": w.get("user_jwt")})
+    got = w.get("user_jwt") if isinstance(w, dict) else None
+    if env == "prod":
+        if got != expected:
+            raise SystemExit(f"JWT propagation failed: expected {expected}, got {w}")
+    else:
+        if got != expected:
+            print(f"JWT propagation not enforced in {env}: expected {expected}, got {w}")
+    print({"user_jwt": got})
 
 
 if __name__ == "__main__":

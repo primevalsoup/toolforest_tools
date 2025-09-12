@@ -181,6 +181,20 @@ class ToolsetPipelineStack(Stack):
         else:
             build_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
 
+        build_project = codebuild.PipelineProject(
+            self,
+            "BuildProject",
+            project_name=f"toolforest-tools-build-{env_name}",
+            environment=codebuild.BuildEnvironment(
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                privileged=True,
+                compute_type=compute_type,
+            ),
+            environment_variables=build_env_vars,
+            build_spec=build_buildspec,
+            cache=codebuild.Cache.local(codebuild.LocalCacheMode.CUSTOM),
+        )
+
         deploy_buildspec = codebuild.BuildSpec.from_object(
             {
                 "version": "0.2",
@@ -306,5 +320,5 @@ def build_pipelines(app: cdk.App) -> None:
             github_repo=github_repo,
             github_branch=branch,
             connection_arn=connection_arn,
-            github_token_secret_name=None if connection_arn else github_token_secret_name,
+            github_token_secret_name=github_token_secret_name,
         )

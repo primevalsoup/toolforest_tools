@@ -67,51 +67,128 @@ class ToolsetPipelineStack(Stack):
                 trigger=cpactions.GitHubTrigger.WEBHOOK,
             )
 
-        test_project = codebuild.PipelineProject(
-            self,
-            "TestProject",
-            environment=codebuild.BuildEnvironment(build_image=codebuild.LinuxBuildImage.STANDARD_7_0, privileged=True),
-            environment_variables={"ENV": codebuild.BuildEnvironmentVariable(value=env_name)},
-            build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/test.yml"),
-            cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/test/{env_name}"),
-        )
+        # Compute type: SMALL for all environments
+        compute_type = codebuild.ComputeType.SMALL
 
-        build_project = codebuild.PipelineProject(
-            self,
-            "BuildProject",
-            environment=codebuild.BuildEnvironment(build_image=codebuild.LinuxBuildImage.STANDARD_7_0, privileged=True),
-            environment_variables={"ENV": codebuild.BuildEnvironmentVariable(value=env_name)},
-            build_spec=codebuild.BuildSpec.from_source_filename("pipeline/buildspecs/build.yml"),
-            cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/build/{env_name}"),
-        )
-
-        # Inline deploy buildspec so it does not depend on primary source containing the file
-        deploy_buildspec = codebuild.BuildSpec.from_object(
+        # Inline Test buildspec
+        test_buildspec = codebuild.BuildSpec.from_object(
             {
                 "version": "0.2",
                 "phases": {
                     "install": {
                         "runtime-versions": {"python": "3.12"},
                         "commands": [
-                            "curl -LsSf https://astral.sh/uv/install.sh | sh",
-                            "export PATH=$HOME/.local/bin:$PATH",
-                            "uv venv --python 3.12",
+                            "python3 -m venv .venv",
                             ". .venv/bin/activate",
-                            "uv pip install -r requirements.txt",
+                            "python -m pip install --upgrade pip",
+                            "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
+                            "pip install -r \"$REQ\"",
+                            # Install client adapter from GitHub using token
+                            "if [ -n \"$GITHUB_PAT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.1.0#egg=mcp-server-adapter; else echo GITHUB_PAT not set; fi",
+                        ],
+                    },
+                    "build": {"commands": [". .venv/bin/activate && pytest -q toolsets"]},
+                },
+            }
+        )
+
+        test_project = codebuild.PipelineProject(
+            self,
+            "TestProject",
+            project_name=f"toolforest-tools-test-{env_name}",
+            environment=codebuild.BuildEnvironment(
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                privileged=True,
+                compute_type=compute_type,
+            ),
+            environment_variables={
+                "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
+                "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
+                # Provide GitHub token to build for private repo install
+                "GITHUB_PAT": codebuild.BuildEnvironmentVariable(
+                    value=github_token_secret_name or "",
+                    type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+                ),
+            },
+            build_spec=test_buildspec,
+            cache=codebuild.Cache.local(codebuild.LocalCacheMode.CUSTOM),
+        )
+
+        # Inline Build buildspec
+        build_buildspec = codebuild.BuildSpec.from_object(
+            {
+                "version": "0.2",
+                "phases": {
+                    "install": {
+                        "runtime-versions": {"python": "3.12"},
+                        "commands": [
+                            "python3 -m venv .venv",
+                            ". .venv/bin/activate",
+                            "python -m pip install --upgrade pip",
+                            "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
+                            "pip install -r \"$REQ\"",
+                            # Install client adapter for synth-time references if needed
+                            "if [ -n \"$GITHUB_PAT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.1.0#egg=mcp-server-adapter; else echo GITHUB_PAT not set; fi",
+                            "npm install -g aws-cdk@2",
+                        ],
+                    },
+                    "build": {"commands": ["ENV=$ENV npx cdk synth"]},
+                },
+                "artifacts": {"files": ["cdk.out/**"]},
+            }
+        )
+
+        build_project = codebuild.PipelineProject(
+            self,
+            "BuildProject",
+            project_name=f"toolforest-tools-build-{env_name}",
+            environment=codebuild.BuildEnvironment(
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                privileged=True,
+                compute_type=compute_type,
+            ),
+            environment_variables={
+                "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
+                "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
+                "GITHUB_PAT": codebuild.BuildEnvironmentVariable(
+                    value=github_token_secret_name or "",
+                    type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+                ),
+            },
+            build_spec=build_buildspec,
+            cache=codebuild.Cache.local(codebuild.LocalCacheMode.DOCKER_LAYER, codebuild.LocalCacheMode.CUSTOM),
+        )
+
+        # Inline deploy buildspec so it does not depend on primary source containing the file
+        deploy_buildspec = codebuild.BuildSpec.from_object(
+            {
+                "version": "0.2",
+                "env": {"variables": {"CB_CUSTOM_CACHE_DIR": ".venv/.cache/pip"}},
+                "phases": {
+                    "install": {
+                        "runtime-versions": {"python": "3.12"},
+                        "commands": [
+                            # Create venv with system Python and install requirements from source artifact
+                            "python3 -m venv .venv",
+                            ". .venv/bin/activate",
+                            "python -m pip install --upgrade pip",
+                            # Resolve requirements.txt from any input artifact
+                            "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
+                            "pip install -r \"$REQ\"",
+                            # Install client adapter for deploy-time smoke
+                            "if [ -n \"$GITHUB_PAT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.1.0#egg=mcp-server-adapter; else echo GITHUB_PAT not set; fi",
                             "npm install -g aws-cdk@2",
                         ],
                     },
                     "build": {
                         "commands": [
-                            "echo Ensure cdk.out available from artifacts",
-                            "if [ ! -d cdk.out ]; then CANDIDATE=$(find . -maxdepth 3 -type d -name cdk.out | head -n1 || true); if [ -n \"$CANDIDATE\" ]; then echo Using cdk.out from $CANDIDATE; cp -R \"$CANDIDATE\" ./cdk.out; else echo cdk.out not found; exit 1; fi; fi",
-                            "echo Deploy from pre-synthesized templates",
-                            "ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --app cdk.out --require-approval never",
+                            # Locate smoke script within input artifacts and derive repo root
+                            "SMOKE=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do CAND=$(find \"$d\" -maxdepth 6 -type f -path '*/scripts/smoke_invoke.py' | head -n1 || true); if [ -n \"$CAND\" ]; then SMOKE=\"$CAND\"; break; fi; done; if [ -z \"$SMOKE\" ]; then echo 'smoke_invoke.py not found in inputs'; exit 1; fi; echo Using smoke at $SMOKE",
+                            "REPO_ROOT=$(dirname \"$(dirname \"$SMOKE\")\")",
+                            "echo Deploy from source using CDK app",
+                            "(cd \"$REPO_ROOT\" && ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never)",
                             "echo Smoke test for $ENV",
-                            # Locate smoke script in secondary source (repo) and run it
-                            "SMOKE=$(find . -maxdepth 5 -type f -path '*/scripts/smoke_invoke.py' | head -n1 || true)",
-                            "if [ -z \"$SMOKE\" ]; then echo 'smoke_invoke.py not found'; exit 1; fi",
-                            ". .venv/bin/activate && PYTHONPATH=packages/mcp-remote-toolsets/src ENV=$ENV python3 \"$SMOKE\"",
+                            ". .venv/bin/activate && PYTHONPATH=\"$REPO_ROOT/packages/mcp-remote-toolsets/src\" ENV=$ENV python3 \"$SMOKE\"",
                         ],
                     },
                 },
@@ -122,34 +199,44 @@ class ToolsetPipelineStack(Stack):
         deploy_project = codebuild.PipelineProject(
             self,
             "DeployProject",
-            environment=codebuild.BuildEnvironment(build_image=codebuild.LinuxBuildImage.STANDARD_7_0, privileged=True),
+            project_name=f"toolforest-tools-deploy-{env_name}",
+            environment=codebuild.BuildEnvironment(
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                privileged=True,
+                compute_type=compute_type,
+            ),
             environment_variables={
                 "ENV": codebuild.BuildEnvironmentVariable(value=env_name),
                 "OWNER": codebuild.BuildEnvironmentVariable(value=os.getenv("OWNER", "gerrit@toolforest.io")),
+                "CB_CUSTOM_CACHE_DIR": codebuild.BuildEnvironmentVariable(value=".venv/.cache/pip"),
+                "GITHUB_PAT": codebuild.BuildEnvironmentVariable(
+                    value=github_token_secret_name or "",
+                    type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+                ),
             },
             build_spec=deploy_buildspec,
-            cache=codebuild.Cache.bucket(cache_bucket, prefix=f"toolforest/tools/deploy/{env_name}"),
+            cache=codebuild.Cache.local(codebuild.LocalCacheMode.DOCKER_LAYER, codebuild.LocalCacheMode.CUSTOM),
         )
 
         if deploy_project.role:
             deploy_project.role.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name("AdministratorAccess"))
 
-        test_action = cpactions.CodeBuildAction(action_name="Test", project=test_project, input=source_output)
-        build_action = cpactions.CodeBuildAction(action_name="Build", project=build_project, input=source_output, outputs=[build_output])
+        test_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-test-{env_name}", project=test_project, input=source_output)
+        build_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-build-{env_name}", project=build_project, input=source_output, outputs=[build_output])
         # Provide both artifacts: primary is SynthOutput, extra is source repo for smoke script
-        deploy_action = cpactions.CodeBuildAction(action_name="DeployAndValidate", project=deploy_project, input=build_output, extra_inputs=[source_output])
+        deploy_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-deploy-{env_name}", project=deploy_project, input=build_output, extra_inputs=[source_output])
 
         pipeline = codepipeline.Pipeline(self, "Pipeline", pipeline_name=f"toolforest-tools-pipeline-{env_name}", pipeline_type=codepipeline.PipelineType.V2)
 
-        pipeline.add_stage(stage_name="Source", actions=[source_action])
-        pipeline.add_stage(stage_name="Test", actions=[test_action])
-        pipeline.add_stage(stage_name="Build", actions=[build_action])
+        pipeline.add_stage(stage_name=f"toolforest-tools-source-{env_name}", actions=[source_action])
+        pipeline.add_stage(stage_name=f"toolforest-tools-test-{env_name}", actions=[test_action])
+        pipeline.add_stage(stage_name=f"toolforest-tools-build-{env_name}", actions=[build_action])
 
         if env_name == "prod":
-            approval = cpactions.ManualApprovalAction(action_name="ManualApproval")
-            pipeline.add_stage(stage_name="Approve", actions=[approval])
+            approval = cpactions.ManualApprovalAction(action_name=f"toolforest-tools-approve-{env_name}")
+            pipeline.add_stage(stage_name=f"toolforest-tools-approve-{env_name}", actions=[approval])
 
-        pipeline.add_stage(stage_name="Deploy", actions=[deploy_action])
+        pipeline.add_stage(stage_name=f"toolforest-tools-deploy-{env_name}", actions=[deploy_action])
 
 
 def build_pipelines(app: cdk.App) -> None:

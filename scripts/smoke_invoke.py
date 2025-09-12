@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from mcp_remote_toolsets import load_registry, load_toolset_proxies
+from mcp_server_adapter import load_registry, load_toolset_proxies
 
 
 def main() -> None:

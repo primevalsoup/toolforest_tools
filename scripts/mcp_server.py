@@ -7,8 +7,8 @@ from typing import Any, Dict
 
 from mcp.server.fastmcp import FastMCP
 
-from mcp_remote_toolsets import load_registry, load_toolset_proxies
-from mcp_remote_toolsets.proxies import set_context_provider
+from mcp_server_adapter import load_registry, load_toolset_proxies
+from mcp_server_adapter import set_context_provider
 
 
 def get_context() -> Dict[str, Any]:

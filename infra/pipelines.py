@@ -224,7 +224,7 @@ class ToolsetPipelineStack(Stack):
                             "echo Deploy from source using CDK app",
                             "(cd \"$REPO_ROOT\" && ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never)",
                             "echo Smoke test for $ENV",
-                            ". .venv/bin/activate && ENV=$ENV python3 \"$SMOKE\"",
+                            ". .venv/bin/activate && if [ \"$ENV\" = \"prod\" ]; then export MCP_USER_JWT=test-jwt-abc.def.ghijklmnopqrstuvwxyz1234567890abcd; fi; ENV=$ENV python3 \"$SMOKE\"",
                         ],
                     },
                 },

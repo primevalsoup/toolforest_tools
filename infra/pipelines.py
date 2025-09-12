@@ -211,7 +211,8 @@ class ToolsetPipelineStack(Stack):
                             # Prefer main source requirements.txt
                             "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
+                            # Install client adapter: prefer local ClientSource if present (dev/test), else use Git
+                            "CLIENT_SRC=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT_SRC=\"$d\"; break; fi; done; if [ -n \"$CLIENT_SRC\" ]; then echo \"Installing client adapter from local source: $CLIENT_SRC\"; pip install -e \"$CLIENT_SRC\"; else if [ -n \"$GITHUB_PAT\" ]; then echo \"Installing client adapter from pinned Git URL\"; pip install \"git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\"; else echo \"Installing client adapter from public Git URL (if accessible)\"; pip install \"git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\" || true; fi; fi",
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                             "npm install -g aws-cdk@2",
                         ],
@@ -277,7 +278,12 @@ class ToolsetPipelineStack(Stack):
             extra_inputs=[client_source_output] if client_source_output is not None else None,  # type: ignore[arg-type]
         )
         build_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-build-{env_name}", project=build_project, input=source_output, outputs=[build_output])
-        deploy_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-deploy-{env_name}", project=deploy_project, input=build_output, extra_inputs=[source_output])
+
+        # Include client source artifact in deploy for dev/test so smoke/install can use it
+        deploy_extra_inputs = [source_output]
+        if client_source_output is not None:
+            deploy_extra_inputs.append(client_source_output)
+        deploy_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-deploy-{env_name}", project=deploy_project, input=build_output, extra_inputs=deploy_extra_inputs)
 
         pipeline = codepipeline.Pipeline(self, "Pipeline", pipeline_name=f"toolforest-tools-pipeline-{env_name}", pipeline_type=codepipeline.PipelineType.V2)
 

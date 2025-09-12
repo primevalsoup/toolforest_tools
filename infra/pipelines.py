@@ -67,6 +67,32 @@ class ToolsetPipelineStack(Stack):
                 trigger=cpactions.GitHubTrigger.WEBHOOK,
             )
 
+        # Optional second Source for client adapter (dev/test only)
+        client_source_output: Optional[codepipeline.Artifact] = None
+        client_source_action: Optional[cpactions.GitHubSourceAction] = None
+        if env_name in ("dev", "test"):
+            client_source_output = codepipeline.Artifact(artifact_name="ClientSource")
+            if connection_arn:
+                client_source_action = cpactions.CodeStarConnectionsSourceAction(
+                    action_name="ClientSource",
+                    owner=github_owner,
+                    repo="toolforest_tools_client",
+                    branch=github_branch,
+                    connection_arn=connection_arn,
+                    output=client_source_output,
+                    trigger_on_push=True,
+                )  # type: ignore[assignment]
+            else:
+                client_source_action = cpactions.GitHubSourceAction(
+                    action_name="ClientSource",
+                    owner=github_owner,
+                    repo="toolforest_tools_client",
+                    branch=github_branch,
+                    oauth_token=cdk.SecretValue.secrets_manager(github_token_secret_name),
+                    output=client_source_output,
+                    trigger=cpactions.GitHubTrigger.WEBHOOK,
+                )
+
         # Compute type: SMALL for all environments
         compute_type = codebuild.ComputeType.SMALL
 
@@ -83,8 +109,10 @@ class ToolsetPipelineStack(Stack):
                             "python -m pip install --upgrade pip",
                             "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter from GitHub using token (fallback to public if available)
-                            "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
+                            # Install client adapter from second source if present (branch-aligned)
+                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then echo \"Installing client from $CLIENT\"; pip install -e \"$CLIENT\"; else echo \"No client source found; using pinned adapter\"; fi",
+                            # Fallback network install (dev/test only) if needed
+                            "if [ -z \"$CLIENT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || true; fi",
                             # Verify import
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                         ],
@@ -129,8 +157,8 @@ class ToolsetPipelineStack(Stack):
                             "python -m pip install --upgrade pip",
                             "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter (fallback public)
-                            "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
+                            # Optional: install client adapter if needed for synth (not strictly required)
+                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then pip install -e \"$CLIENT\"; else pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || true; fi",
                             "npm install -g aws-cdk@2",
                         ],
                     },
@@ -161,7 +189,7 @@ class ToolsetPipelineStack(Stack):
             cache=codebuild.Cache.local(codebuild.LocalCacheMode.DOCKER_LAYER, codebuild.LocalCacheMode.CUSTOM),
         )
 
-        # Inline deploy buildspec so it does not depend on primary source containing the file
+        # Inline deploy buildspec remains unchanged (installs pinned or token-based adapter)
         deploy_buildspec = codebuild.BuildSpec.from_object(
             {
                 "version": "0.2",
@@ -170,29 +198,23 @@ class ToolsetPipelineStack(Stack):
                     "install": {
                         "runtime-versions": {"python": "3.12"},
                         "commands": [
-                            # Create venv with system Python and install requirements from source artifact
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",
                             "python -m pip install --upgrade pip",
-                            # Resolve requirements.txt from any input artifact
                             "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter for deploy-time smoke (fallback public)
                             "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
-                            # Verify import
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                             "npm install -g aws-cdk@2",
                         ],
                     },
                     "build": {
                         "commands": [
-                            # Locate smoke script within input artifacts and derive repo root
                             "SMOKE=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do CAND=$(find \"$d\" -maxdepth 6 -type f -path '*/scripts/smoke_invoke.py' | head -n1 || true); if [ -n \"$CAND\" ]; then SMOKE=\"$CAND\"; break; fi; done; if [ -z \"$SMOKE\" ]; then echo 'smoke_invoke.py not found in inputs'; exit 1; fi; echo Using smoke at $SMOKE",
                             "REPO_ROOT=$(dirname \"$(dirname \"$SMOKE\")\")",
                             "echo Deploy from source using CDK app",
                             "(cd \"$REPO_ROOT\" && ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never)",
                             "echo Smoke test for $ENV",
-                            # Run smoke without legacy PYTHONPATH
                             ". .venv/bin/activate && ENV=$ENV python3 \"$SMOKE\"",
                         ],
                     },
@@ -226,14 +248,23 @@ class ToolsetPipelineStack(Stack):
         if deploy_project.role:
             deploy_project.role.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name("AdministratorAccess"))
 
-        test_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-test-{env_name}", project=test_project, input=source_output)
+        test_action = cpactions.CodeBuildAction(
+            action_name=f"toolforest-tools-test-{env_name}",
+            project=test_project,
+            input=source_output,
+            extra_inputs=[client_source_output] if client_source_output is not None else None,  # type: ignore[arg-type]
+        )
         build_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-build-{env_name}", project=build_project, input=source_output, outputs=[build_output])
-        # Provide both artifacts: primary is SynthOutput, extra is source repo for smoke script
         deploy_action = cpactions.CodeBuildAction(action_name=f"toolforest-tools-deploy-{env_name}", project=deploy_project, input=build_output, extra_inputs=[source_output])
 
         pipeline = codepipeline.Pipeline(self, "Pipeline", pipeline_name=f"toolforest-tools-pipeline-{env_name}", pipeline_type=codepipeline.PipelineType.V2)
 
-        pipeline.add_stage(stage_name=f"toolforest-tools-source-{env_name}", actions=[source_action])
+        # Source stage with one or two actions
+        if client_source_action is not None:
+            pipeline.add_stage(stage_name=f"toolforest-tools-source-{env_name}", actions=[source_action, client_source_action])
+        else:
+            pipeline.add_stage(stage_name=f"toolforest-tools-source-{env_name}", actions=[source_action])
+
         pipeline.add_stage(stage_name=f"toolforest-tools-test-{env_name}", actions=[test_action])
         pipeline.add_stage(stage_name=f"toolforest-tools-build-{env_name}", actions=[build_action])
 

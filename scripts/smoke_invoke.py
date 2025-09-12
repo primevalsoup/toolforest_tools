@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import os
 
-from mcp_server_adapter import load_registry, load_toolset_proxies
-from mcp_server_adapter import set_context_provider
+# Import directly from submodules to avoid reliance on top-level exports
+from mcp_server_adapter.registry import load_registry
+from mcp_server_adapter.proxies import load_toolset_proxies
+from mcp_server_adapter.context import set_context_provider
 
 
 def main() -> None:

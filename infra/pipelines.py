@@ -83,8 +83,10 @@ class ToolsetPipelineStack(Stack):
                             "python -m pip install --upgrade pip",
                             "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter from GitHub using token
-                            "if [ -n \"$GITHUB_PAT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.1.0#egg=mcp-server-adapter; else echo GITHUB_PAT not set; fi",
+                            # Install client adapter from GitHub using token (fallback to public if available)
+                            "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
+                            # Verify import
+                            "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                         ],
                     },
                     "build": {"commands": [". .venv/bin/activate && pytest -q toolsets"]},
@@ -127,8 +129,8 @@ class ToolsetPipelineStack(Stack):
                             "python -m pip install --upgrade pip",
                             "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find . -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter for synth-time references if needed
-                            "if [ -n \"$GITHUB_PAT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.1.0#egg=mcp-server-adapter; else echo GITHUB_PAT not set; fi",
+                            # Install client adapter (fallback public)
+                            "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
                             "npm install -g aws-cdk@2",
                         ],
                     },
@@ -175,8 +177,10 @@ class ToolsetPipelineStack(Stack):
                             # Resolve requirements.txt from any input artifact
                             "REQ=\"\"; if [ -f requirements.txt ]; then REQ=requirements.txt; else for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ -z \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ -z \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter for deploy-time smoke
-                            "if [ -n \"$GITHUB_PAT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.1.0#egg=mcp-server-adapter; else echo GITHUB_PAT not set; fi",
+                            # Install client adapter for deploy-time smoke (fallback public)
+                            "pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || pip install git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter",
+                            # Verify import
+                            "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                             "npm install -g aws-cdk@2",
                         ],
                     },
@@ -188,7 +192,8 @@ class ToolsetPipelineStack(Stack):
                             "echo Deploy from source using CDK app",
                             "(cd \"$REPO_ROOT\" && ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never)",
                             "echo Smoke test for $ENV",
-                            ". .venv/bin/activate && PYTHONPATH=\"$REPO_ROOT/packages/mcp-remote-toolsets/src\" ENV=$ENV python3 \"$SMOKE\"",
+                            # Run smoke without legacy PYTHONPATH
+                            ". .venv/bin/activate && ENV=$ENV python3 \"$SMOKE\"",
                         ],
                     },
                 },

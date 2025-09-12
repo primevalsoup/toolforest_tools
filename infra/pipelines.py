@@ -245,6 +245,10 @@ class ToolsetPipelineStack(Stack):
                 value=github_token_secret_name,
                 type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
             )
+            # Provide deterministic JWT for smoke assertion in prod
+            deploy_env_vars["MCP_USER_JWT"] = codebuild.BuildEnvironmentVariable(
+                value="test-jwt-abc.def.ghijklmnopqrstuvwxyz1234567890abcd",
+            )
         else:
             if github_token_secret_name:
                 deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(

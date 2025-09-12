@@ -110,7 +110,7 @@ class ToolsetPipelineStack(Stack):
                             # Install client adapter from second source if present (branch-aligned)
                             "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then echo \"Installing client from $CLIENT\"; pip install -e \"$CLIENT\"; else echo \"No client source found; using pinned adapter\"; fi",
                             # Fallback network install (dev/test only) if needed
-                            "if [ -z \"$CLIENT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || true; fi",
+                            "if [ -z \"$CLIENT\" ]; then pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.3.0#egg=mcp-server-adapter || true; fi",
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                         ],
                     },
@@ -159,7 +159,7 @@ class ToolsetPipelineStack(Stack):
                             "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
                             # Optional: install client adapter if present for synth
-                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then pip install -e \"$CLIENT\"; else pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter || true; fi",
+                            "CLIENT=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT=\"$d\"; break; fi; done; if [ -n \"$CLIENT\" ]; then pip install -e \"$CLIENT\"; else pip install git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.3.0#egg=mcp-server-adapter || true; fi",
                             "npm install -g aws-cdk@2",
                         ],
                     },
@@ -211,8 +211,8 @@ class ToolsetPipelineStack(Stack):
                             # Prefer main source requirements.txt
                             "REPO_DIR=\"${CODEBUILD_SRC_DIR:-.}\"; REQ=\"$REPO_DIR/requirements.txt\"; if [ ! -f \"$REQ\" ]; then for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -f \"$d/requirements.txt\" ]; then REQ=\"$d/requirements.txt\"; break; fi; done; fi; if [ ! -f \"$REQ\" ]; then REQ=$(find .. -maxdepth 4 -type f -name requirements.txt | head -n1 || true); fi; if [ ! -f \"$REQ\" ]; then echo 'requirements.txt not found in inputs'; exit 1; fi; echo Using requirements at $REQ",
                             "pip install -r \"$REQ\"",
-                            # Install client adapter: prefer local ClientSource if present (dev/test), else use Git
-                            "CLIENT_SRC=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT_SRC=\"$d\"; break; fi; done; if [ -n \"$CLIENT_SRC\" ]; then echo \"Installing client adapter from local source: $CLIENT_SRC\"; pip install -e \"$CLIENT_SRC\"; else if [ -n \"$GITHUB_PAT\" ]; then echo \"Installing client adapter from pinned Git URL\"; pip install \"git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\"; else echo \"Installing client adapter from public Git URL (if accessible)\"; pip install \"git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.2.0#egg=mcp-server-adapter\" || true; fi; fi",
+                            # Install client adapter: dev/test prefer local ClientSource; prod uses pinned Git URL only
+                            "if [ \"$ENV\" != \"prod\" ]; then CLIENT_SRC=\"\"; for d in $(env | awk -F= '/^CODEBUILD_SRC_DIR_/ {print $2}'); do if [ -d \"$d/src/mcp_server_adapter\" ]; then CLIENT_SRC=\"$d\"; break; fi; done; if [ -n \"$CLIENT_SRC\" ]; then echo \"Installing client adapter from local source: $CLIENT_SRC\"; pip install -e \"$CLIENT_SRC\"; else echo \"Installing client adapter from pinned Git URL (non-prod)\"; pip install \"git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.3.0#egg=mcp-server-adapter\" || pip install \"git+https://github.com/primevalsoup/toolforest_tools_client.git@v0.3.0#egg=mcp-server-adapter\"; fi; else echo \"Installing client adapter from pinned Git URL (prod)\"; pip install \"git+https://$GITHUB_PAT@github.com/primevalsoup/toolforest_tools_client.git@v0.3.0#egg=mcp-server-adapter\"; fi",
                             "python -c \"import mcp_server_adapter; print('mcp_server_adapter OK')\"",
                             "npm install -g aws-cdk@2",
                         ],
@@ -224,7 +224,7 @@ class ToolsetPipelineStack(Stack):
                             "echo Deploy from source using CDK app",
                             "(cd \"$REPO_ROOT\" && ENV=$ENV OWNER=${OWNER:-pipeline@toolforest.io} npx cdk deploy --require-approval never)",
                             "echo Smoke test for $ENV",
-                            ". .venv/bin/activate && ENV=$ENV python3 \"$SMOKE\"",
+                            ". .venv/bin/activate && if [ \"$ENV\" = \"prod\" ]; then export MCP_USER_JWT=test-jwt-abc.def.ghijklmnopqrstuvwxyz1234567890abcd; fi; ENV=$ENV python3 \"$SMOKE\"",
                         ],
                     },
                 },
@@ -244,6 +244,10 @@ class ToolsetPipelineStack(Stack):
             deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(
                 value=github_token_secret_name,
                 type=codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
+            )
+            # Provide deterministic JWT for smoke assertion in prod
+            deploy_env_vars["MCP_USER_JWT"] = codebuild.BuildEnvironmentVariable(
+                value="test-jwt-abc.def.ghijklmnopqrstuvwxyz1234567890abcd",
             )
         else:
             if github_token_secret_name:

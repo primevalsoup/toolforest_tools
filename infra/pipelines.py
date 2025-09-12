@@ -136,7 +136,7 @@ class ToolsetPipelineStack(Stack):
             "TestProject",
             project_name=f"toolforest-tools-test-{env_name}",
             environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.STANDARD_8_0,
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
                 privileged=True,
                 compute_type=compute_type,
             ),
@@ -186,7 +186,7 @@ class ToolsetPipelineStack(Stack):
             "BuildProject",
             project_name=f"toolforest-tools-build-{env_name}",
             environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.STANDARD_8_0,
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
                 privileged=True,
                 compute_type=compute_type,
             ),
@@ -263,7 +263,7 @@ class ToolsetPipelineStack(Stack):
             "DeployProject",
             project_name=f"toolforest-tools-deploy-{env_name}",
             environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.STANDARD_8_0,
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
                 privileged=True,
                 compute_type=compute_type,
             ),

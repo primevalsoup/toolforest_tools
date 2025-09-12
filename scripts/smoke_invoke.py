@@ -4,10 +4,15 @@ from __future__ import annotations
 import os
 
 from mcp_server_adapter import load_registry, load_toolset_proxies
+from mcp_server_adapter import set_context_provider
 
 
 def main() -> None:
     env = os.getenv("ENV", "dev")
+
+    # Register context provider to propagate JWT from environment
+    set_context_provider(lambda: {"user_jwt": os.getenv("MCP_USER_JWT", "")})
+
     entries = load_registry(env)
     proxies = load_toolset_proxies(entries)
 

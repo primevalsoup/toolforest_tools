@@ -99,7 +99,7 @@ class ToolsetPipelineStack(Stack):
                 "version": "0.2",
                 "phases": {
                     "install": {
-                        "runtime-versions": {"python": "3.12"},
+                        "runtime-versions": {"python": "3.12", "nodejs": "20"},
                         "commands": [
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",
@@ -150,7 +150,7 @@ class ToolsetPipelineStack(Stack):
                 "version": "0.2",
                 "phases": {
                     "install": {
-                        "runtime-versions": {"python": "3.12"},
+                        "runtime-versions": {"python": "3.12", "nodejs": "20"},
                         "commands": [
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",
@@ -201,7 +201,7 @@ class ToolsetPipelineStack(Stack):
                 "env": {"variables": {"CB_CUSTOM_CACHE_DIR": ".venv/.cache/pip"}},
                 "phases": {
                     "install": {
-                        "runtime-versions": {"python": "3.12"},
+                        "runtime-versions": {"python": "3.12", "nodejs": "20"},
                         "commands": [
                             "python3 -m venv .venv",
                             ". .venv/bin/activate",

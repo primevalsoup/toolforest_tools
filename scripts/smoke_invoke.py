@@ -31,7 +31,8 @@ def main() -> None:
     w = whoami()
     expected = os.environ["MCP_USER_JWT"]
     got = w.get("user_jwt") if isinstance(w, dict) else None
-    if env == "prod":
+    strict = os.getenv("STRICT_JWT", "0").lower() in ("1", "true", "yes", "on")
+    if env == "prod" or strict:
         if got != expected:
             raise SystemExit(f"JWT propagation failed: expected {expected}, got {w}")
     else:

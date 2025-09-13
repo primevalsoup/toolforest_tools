@@ -13,6 +13,8 @@ htmlcov/
 
 # CDK / Cloud
 cdk.out/
+.cdk/
+.cdkvenv/
 *.template.json
 *.template.yaml
 .aws-sam/

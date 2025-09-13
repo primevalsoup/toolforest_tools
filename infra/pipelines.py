@@ -257,6 +257,8 @@ class ToolsetPipelineStack(Stack):
                 )
             else:
                 deploy_env_vars["GITHUB_PAT"] = codebuild.BuildEnvironmentVariable(value="")
+            # Enforce strict JWT smoke assertion in non-prod envs
+            deploy_env_vars["STRICT_JWT"] = codebuild.BuildEnvironmentVariable(value="1")
 
         deploy_project = codebuild.PipelineProject(
             self,
